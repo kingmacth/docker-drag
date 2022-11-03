@@ -88,8 +88,11 @@ layers = resp.json()['layers']
 
 # Create tmp folder that will hold the image
 imgdir = 'tmp_{}_{}'.format(img, tag.replace(':', '@'))
-os.mkdir(imgdir)
-print('Creating image structure in: ' + imgdir)
+if os.path.exists(imgdir):
+    print('文件夹已存在，继续下载!')
+else:
+    os.mkdir(imgdir)
+    print('Creating image structure in: ' + imgdir)
 
 config = resp.json()['config']['digest']
 confresp = requests.get('https://{}/v2/{}/blobs/{}'.format(registry, repository, config), headers=auth_head, verify=False)
@@ -118,68 +121,71 @@ for layer in layers:
 	# FIXME: Creating fake layer ID. Don't know how Docker generates it
 	fake_layerid = hashlib.sha256((parentid+'\n'+ublob+'\n').encode('utf-8')).hexdigest()
 	layerdir = imgdir + '/' + fake_layerid
-	os.mkdir(layerdir)
+	if os.path.exists(layerdir) == True:
+		print(layerdir + "文件夹已存在，继续下一个layer！")
+	else:
+		os.mkdir(layerdir)
 
-	# Creating VERSION file
-	file = open(layerdir + '/VERSION', 'w')
-	file.write('1.0')
-	file.close()
+        # Creating VERSION file
+		file = open(layerdir + '/VERSION', 'w')
+		file.write('1.0')
+		file.close()
 
-	# Creating layer.tar file
-	sys.stdout.write(ublob[7:19] + ': Downloading...')
-	sys.stdout.flush()
-	auth_head = get_auth_head('application/vnd.docker.distribution.manifest.v2+json') # refreshing token to avoid its expiration
-	bresp = requests.get('https://{}/v2/{}/blobs/{}'.format(registry, repository, ublob), headers=auth_head, stream=True, verify=False)
-	if (bresp.status_code != 200): # When the layer is located at a custom URL
-		bresp = requests.get(layer['urls'][0], headers=auth_head, stream=True, verify=False)
-		if (bresp.status_code != 200):
-			print('\rERROR: Cannot download layer {} [HTTP {}]'.format(ublob[7:19], bresp.status_code, bresp.headers['Content-Length']))
-			print(bresp.content)
-			exit(1)
-	# Stream download and follow the progress
-	bresp.raise_for_status()
-	unit = int(bresp.headers['Content-Length']) / 50
-	acc = 0
-	nb_traits = 0
-	progress_bar(ublob, nb_traits)
-	with open(layerdir + '/layer_gzip.tar', "wb") as file:
-		for chunk in bresp.iter_content(chunk_size=8192): 
-			if chunk:
-				file.write(chunk)
-				acc = acc + 8192
-				if acc > unit:
-					nb_traits = nb_traits + 1
-					progress_bar(ublob, nb_traits)
-					acc = 0
-	sys.stdout.write("\r{}: Extracting...{}".format(ublob[7:19], " "*50)) # Ugly but works everywhere
-	sys.stdout.flush()
-	with open(layerdir + '/layer.tar', "wb") as file: # Decompress gzip response
-		unzLayer = gzip.open(layerdir + '/layer_gzip.tar','rb')
-		shutil.copyfileobj(unzLayer, file)
-		unzLayer.close()
-	os.remove(layerdir + '/layer_gzip.tar')
-	print("\r{}: Pull complete [{}]".format(ublob[7:19], bresp.headers['Content-Length']))
-	content[0]['Layers'].append(fake_layerid + '/layer.tar')
-	
-	# Creating json file
-	file = open(layerdir + '/json', 'w')
-	# last layer = config manifest - history - rootfs
-	if layers[-1]['digest'] == layer['digest']:
-		# FIXME: json.loads() automatically converts to unicode, thus decoding values whereas Docker doesn't
-		json_obj = json.loads(confresp.content)
-		del json_obj['history']
-		try:
-			del json_obj['rootfs']
-		except: # Because Microsoft loves case insensitiveness
-			del json_obj['rootfS']
-	else: # other layers json are empty
-		json_obj = json.loads(empty_json)
-	json_obj['id'] = fake_layerid
-	if parentid:
-		json_obj['parent'] = parentid
-	parentid = json_obj['id']
-	file.write(json.dumps(json_obj))
-	file.close()
+		# Creating layer.tar file
+		sys.stdout.write(ublob[7:19] + ': Downloading...')
+		sys.stdout.flush()
+		auth_head = get_auth_head('application/vnd.docker.distribution.manifest.v2+json') # refreshing token to avoid its expiration
+		bresp = requests.get('https://{}/v2/{}/blobs/{}'.format(registry, repository, ublob), headers=auth_head, stream=True, verify=False)
+		if (bresp.status_code != 200): # When the layer is located at a custom URL
+			bresp = requests.get(layer['urls'][0], headers=auth_head, stream=True, verify=False)
+			if (bresp.status_code != 200):
+				print('\rERROR: Cannot download layer {} [HTTP {}]'.format(ublob[7:19], bresp.status_code, bresp.headers['Content-Length']))
+				print(bresp.content)
+				exit(1)
+		# Stream download and follow the progress
+		bresp.raise_for_status()
+		unit = int(bresp.headers['Content-Length']) / 50
+		acc = 0
+		nb_traits = 0
+		progress_bar(ublob, nb_traits)
+		with open(layerdir + '/layer_gzip.tar', "wb") as file:
+			for chunk in bresp.iter_content(chunk_size=8192): 
+				if chunk:
+					file.write(chunk)
+					acc = acc + 8192
+					if acc > unit:
+						nb_traits = nb_traits + 1
+						progress_bar(ublob, nb_traits)
+						acc = 0
+		sys.stdout.write("\r{}: Extracting...{}".format(ublob[7:19], " "*50)) # Ugly but works everywhere
+		sys.stdout.flush()
+		with open(layerdir + '/layer.tar', "wb") as file: # Decompress gzip response
+			unzLayer = gzip.open(layerdir + '/layer_gzip.tar','rb')
+			shutil.copyfileobj(unzLayer, file)
+			unzLayer.close()
+		os.remove(layerdir + '/layer_gzip.tar')
+		print("\r{}: Pull complete [{}]".format(ublob[7:19], bresp.headers['Content-Length']))
+		content[0]['Layers'].append(fake_layerid + '/layer.tar')
+		
+		# Creating json file
+		file = open(layerdir + '/json', 'w')
+		# last layer = config manifest - history - rootfs
+		if layers[-1]['digest'] == layer['digest']:
+			# FIXME: json.loads() automatically converts to unicode, thus decoding values whereas Docker doesn't
+			json_obj = json.loads(confresp.content)
+			del json_obj['history']
+			try:
+				del json_obj['rootfs']
+			except: # Because Microsoft loves case insensitiveness
+				del json_obj['rootfS']
+		else: # other layers json are empty
+			json_obj = json.loads(empty_json)
+		json_obj['id'] = fake_layerid
+		if parentid:
+			json_obj['parent'] = parentid
+		parentid = json_obj['id']
+		file.write(json.dumps(json_obj))
+		file.close()
 
 file = open(imgdir + '/manifest.json', 'w')
 file.write(json.dumps(content))
